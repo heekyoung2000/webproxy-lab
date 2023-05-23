@@ -27,41 +27,49 @@ int main(int argc, char **argv) {
     exit(1);
   }
 
+  /*해당 포트 번호에 해당하는 듣기 소켓 식별자를 열어준다.*/
   listenfd = Open_listenfd(argv[1]); //듣기 소켓 오픈
+
+  /*클라이언트의 요청이 올 때마다 새로 연결 소켓을 만들어 doit() 호출*/
   while (1) { // 반복적으로 연결 요청 접수
     clientlen = sizeof(clientaddr);
     connfd = Accept(listenfd, (SA *)&clientaddr, &clientlen);  // line:netp:tiny:accept
+    
+    /*연결이 성공했다는 메세지를 위해, Getnameinfo를 호출하면서 hostname과 port가 채워진다.*/
     Getnameinfo((SA *)&clientaddr, clientlen, hostname, MAXLINE, port, MAXLINE, 0);
     printf("Accepted connection from (%s, %s)\n", hostname, port);
+    /*doit 함수 실행*/
     doit(connfd);   // line:netp:tiny:doit
+    /*서버 연결 식별자를 닫아준다.*/
     Close(connfd);  // line:netp:tiny:close
   }
 }
 
-void doit(int fd)
+void doit(int fd) // 클라이언트의 요청 라인을 확인해 정적, 동적 컨텐츠인지를 구분하고 각각의 서버에 보낸다.
 {
   int is_static;
   struct stat sbuf;
-  char buf[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE];
-  char filename[MAXLINE], cgiargs[MAXLINE];
+  char buf[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE]; // 클라이언트에게서 받은 요청(rio)로 채워진다.
+  char filename[MAXLINE], cgiargs[MAXLINE]; //parse_uri를 통해 채워진다.
   rio_t rio;
   
   /* Read request line and headers */
   //요청 라인을 읽고 분석한다.
-  Rio_readinitb(&rio, fd);
-  Rio_readlineb(&rio, buf, MAXLINE);
+  Rio_readinitb(&rio, fd); //rio 버퍼와 fd, 여기서는 서버의 connfd를 연결시켜준다.
+  Rio_readlineb(&rio, buf, MAXLINE); //그리고 rio(==connfd)에 있는 string 한줄을 모두 buf로 옮긴다.
   printf("Request headers:\n");
-  printf("%s", buf);
-  sscanf(buf, "%s %s %s", method, uri, version);
+  printf("%s", buf); //요청 라인 buf="GET /godzilla.gif HTTP/1.1\0"을 표준 출력만 해줌
+  sscanf(buf, "%s %s %s", method, uri, version); //BUF에서 문자열 3개를 읽더와 method, uri, version이라는 문자열에 저장한다. 
 
   if(strcasecmp(method, "GET")) { //만약 클라이언트가 다른 method 요청시 error 띄움 - tiny는 get만 가능
     clienterror(fd, method, "501", "Not implemented", "Tiny does not implement this method");
     return;
   }
-  read_requesthdrs(&rio); // method가 get이면 읽어드림...?
+  read_requesthdrs(&rio); // 요청 라인을 뺀 나머지 요청 헤더들을 무시 한다.(그냥 프린트)
 
   /* Parse URI from GET request */
-  is_static = parse_uri(uri, filename, cgiargs); //uri를 파일이름과 cgi 인자 스트림으로 분석
+  is_static = parse_uri(uri, filename, cgiargs); //uri를 파일이름과 cgi 인자 스트림으로 분석 - cgiargs가 1이면 정적, 0이면 동적
+
   if(stat(filename, &sbuf) < 0) { // 만일 이 파일이 디스크 상에 없으면 에러메시지를 즉시 클라이언트에 보내고 리턴
     clienterror(fd, filename, "404", "Not found", "Tiny couldn't find this file");
     return;
@@ -72,7 +80,7 @@ void doit(int fd)
       clienterror(fd, filename, "403", "Forbidden", "Tiny couldn't read the file");
       return;
     }
-    serve_static(fd, filename, sbuf.st_size); // 클라이언트에게 제공
+    serve_static(fd, filename, sbuf.st_size); // 클라이언트에게 제공 정적 서버에 파일의 사이즈를 같이 보낸다. 
   }
   else { /* Serve dynamic content */
     if(!(S_ISREG(sbuf.st_mode)) || !(S_IXUSR & sbuf.st_mode)) { //이 파일이 동적콘텐츠에서 실행이 가능한지
@@ -83,7 +91,8 @@ void doit(int fd)
   }
 }
 
-void clienterror(int fd, char *cause, char *errnum, char *shortmsg, char *longmsg)
+//에러 메세지와 응답 본체를 서버 소켓을 통해 클라이언트에 보낸다.
+void clienterror(int fd, char *cause, char *errnum, char *shortmsg, char *longmsg) 
 {
   char buf[MAXLINE], body[MAXBUF];
 
@@ -106,6 +115,7 @@ void clienterror(int fd, char *cause, char *errnum, char *shortmsg, char *longms
   Rio_writen(fd, body, strlen(body));
 }
 
+//클라이언트가 버퍼 rp에 보낸 나머지 요청 헤더들은 무시한다.
 void read_requesthdrs(rio_t *rp)
 {
   char buf[MAXLINE];
@@ -147,6 +157,7 @@ int parse_uri(char *uri, char *filename, char *cgiargs)
   }
 }
 
+// 클라이언트가 원하는 정적 컨텐츠 디렉토리를 받아온다. 응답라인과 헤더를 작성하고 서버에게 보낸다. 그 후 정적 컨텐츠 파일을 읽어 그 응답 본체를 클라이언트에 보낸다.
 void serve_static(int fd, char *filename, int filesize)
 {
   int srcfd;
@@ -155,7 +166,7 @@ void serve_static(int fd, char *filename, int filesize)
   /* Send response headers to client */
   get_filetype(filename, filetype); // 파일 이름의 접미어 부분을 검사해서 파일 타입을 결정
   sprintf(buf, "HTTP/1.0 200 OK\r\n"); // 클라이언트에 응답줄과 응답 헤더를 보낸다.
-  sprintf(buf, "%sServer : Tiny Web Server\r\n", buf);
+  sprintf(buf, "%sServer : Tiny Web Server\r\n", buf); // 응답 헤더 작성
   sprintf(buf, "%sConnection : close\r\n", buf);
   sprintf(buf, "%sContent-length : %d\r\n", buf, filesize);
   sprintf(buf, "%sContent-type : %s\r\n\r\n", buf, filetype);
@@ -201,6 +212,7 @@ void get_filetype(char *filename, char *filetype)
     strcpy(filetype, "text/plain");
 }
 
+//클라이언트가 원하는 동적 컨텐츠 디렉토리를 받아온다. 응답 라인과 헤더를 작성하고 서버에게 보낸다.
 void serve_dynamic(int fd, char *filename, char *cgiargs)
 {
   char buf[MAXLINE], *emptylist[] = { NULL };
