@@ -35,7 +35,7 @@ int main(void) {
       *p = '\0';      // &를 \0로 바꿔주고
       strcpy(arg1, buf);  // & 앞에 있었던 인자
       strcpy(arg2, p+1);  // & 뒤에 있었던 인자
-      n1 = atoi(arg1);
+      n1 = atoi(arg1); 
       n2 = atoi(arg2);
   }
 
@@ -53,7 +53,7 @@ int main(void) {
   printf("Content-length:%d\r\n",(int)strlen(content));
   printf("Content-type: text/html\r\n\r\n");
 
-  if (strcasecmp(method,"HEAD")!=0){
+  if (strcasecmp(method,"HEAD")!=0){ //METHOD 가 HEAD가 아니면 content 출력
         printf("%s", content);
   }
   
