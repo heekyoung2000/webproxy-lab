@@ -1,6 +1,10 @@
 #include <stdio.h>
 #include "csapp.h"
 
+/*1.sequential 순차적*/
+/*2.concurrent 동시성*/
+/*3.caching 캐싱*/
+
 /* Recommended max cache and object sizes */
 #define MAX_CACHE_SIZE 1049000
 #define MAX_OBJECT_SIZE 102400
